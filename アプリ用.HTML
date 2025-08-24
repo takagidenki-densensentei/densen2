@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ケーブル許容電流アプリ</title>
+
+  <!-- PWAの設定 -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1166ff">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+
+  <script>
+    // Service Worker 登録
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js')
+        .then(reg => console.log('SW registered:', reg))
+        .catch(err => console.log('SW registration failed:', err));
+    }
+  </script>
+</head>
+p{
+    background-color: black;
+    color: white;
+}
+
+@media screen and (max-width: 768px) {
+    p{
+        background-color: black;
+         color:green;
+     }
+ }
+ 
+ @media screen and (max-width: 480px) {
+    p{
+        background-color: black;
+         color:red;
+     }
+ }
+<body>
+    <picture>
+        <source media="(max-width: 480px)" srcset="sp.jpg"> 
+        <source media="(max-width: 768px)" srcset="ipad.jpeg">
+        <img src="test.png" alt=""> 
+      </picture>
+</body>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ケーブル許容電流（参考値） — 参考版</title>
+<style>
+  :root{--pri:#1166ff;--bg:#f6f7fb;--card:#fff}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:#111}
+  .wrap{max-width:980px;margin:0 auto;padding:14px}
+  header{padding:12px 0;text-align:center}
+  h1{font-size:18px;margin:0 0 6px}
+  .card{background:var(--card);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(0,0,0,.06);margin:12px 0}
+  label{display:block;font-weight:700;margin:8px 0 6px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  select,input,button{width:100%;padding:10px;border-radius:10px;border:1px solid #e6e9ef;background:#fff;font-size:15px}
+  button.action{background:var(--pri);color:#fff;border:none;font-weight:700;cursor:pointer}
+  .result{background:#eef4ff;border:1px dashed #a8c0ff;border-radius:10px;padding:12px;margin-top:10px}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{border:1px solid #eee;padding:8px;text-align:center;font-size:14px}
+  th{background:#fafafa}
+  .pill{display:inline-block;background:#eef;border-radius:999px;padding:4px 10px;margin:2px 6px 2px 0;font-size:12px}
+  .note{font-size:13px;color:#444;margin-top:8px}
+  .flex{display:flex;gap:8px;flex-wrap:wrap}
+  .muted{color:#666;font-size:13px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>ケーブル許容電流（参考値）</h1>
+      <div class="muted">この表は <strong>参考値（JISを直接転載しない丸め・近似）</strong> です。実務では必ず正規のJIS表で確認してください。</div>
+    </header>
+
+    <section class="card" id="calcCard">
+      <h2 style="margin:0 0 8px;font-size:16px">計算</h2>
+      <div class="grid">
+        <div>
+          <label>ケーブル種類</label>
+          <select id="cableType"></select>
+        </div>
+        <div>
+          <label>サイズ (mm²)</label>
+          <select id="cableSize"></select>
+        </div>
+        <div>
+          <label>心線数（VVF/VVR/CVのみ）</label>
+          <select id="coreCount"></select>
+        </div>
+        <div>
+          <label>布設方法</label>
+          <select id="installMethod">
+            <option value="air">空気中布設</option>
+            <option value="pipe">管内布設</option>
+            <option value="earth">地中布設</option>
+          </select>
+        </div>
+        <div>
+          <label>管内条数（管内時のみ）</label>
+          <select id="pipeCount">
+            <option value="1">1条</option>
+            <option value="2">2条</option>
+            <option value="3">3条</option>
+            <option value="4">4条</option>
+          </select>
+        </div>
+        <div>
+          <label>表示単位</label>
+          <select id="rounding">
+            <option value="1">A単位（整数）</option>
+            <option value="5">5A刻みに丸め</option>
+            <option value="10">10A刻みに丸め</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="calcBtn" class="action" style="margin-top:10px">計算する</button>
+
+      <div id="result" class="result">条件を選んで「計算する」を押してください。</div>
+
+      <div class="note">
+        <strong>補足：</strong>このデータは参考値（丸め・近似）です。実務での最終決定は必ず正規のJIS表または社内承認資料で確認してください。
+      </div>
+    </section>
+
+    <section class="card" id="tablesCard">
+      <h2 style="margin:0 0 8px;font-size:16px">代表値（目安）</h2>
+      <div class="note">表は参考値（2心基準で作成。VVF/VVR/CVは心線数係数で補正可）</div>
+
+      <div id="tables"></div>
+    </section>
+  </div>
+
+<script>
+// ================= DATA_SOURCE（参考値：丸め・近似） =================
+// 範囲指定に合わせて網羅的に作成（実務は正規のJIS表で最終確認を）
+const DATA_SOURCE = {
+  IV: {
+    cores: [1],
+    sizes: {
+      "1.25": { air:15,  pipe:14,  earth:13 },
+      "2.0":  { air:21,  pipe:20,  earth:19 },
+      "3.5":  { air:34,  pipe:32,  earth:30 },
+      "5.5":  { air:47,  pipe:44,  earth:42 },
+      "8":    { air:62,  pipe:58,  earth:55 },
+      "14":   { air:95,  pipe:90,  earth:85 },
+      "22":   { air:130, pipe:122, earth:115 },
+      "38":   { air:176, pipe:166, earth:156 },
+      "60":   { air:232, pipe:216, earth:205 },
+      "100":  { air:318, pipe:298, earth:283 },
+      "150":  { air:400, pipe:375, earth:360 },
+      "200":  { air:470, pipe:440, earth:420 },
+      "250":  { air:540, pipe:505, earth:485 }
+    }
+  },
+  VVF: {
+    cores: [2,3,4],
+    sizes: {
+      "1.6": { air:17, pipe:16, earth:15 },
+      "2.0": { air:21, pipe:20, earth:19 }
+    }
+  },
+  VVR: {
+    cores: [2,3,4],
+    sizes: {
+      "2.0": { air:23, pipe:21, earth:20 },
+      "3.5": { air:37, pipe:34, earth:32 },
+      "5.5": { air:50, pipe:46, earth:44 },
+      "8":   { air:65, pipe:60, earth:57 },
+      "14":  { air:95, pipe:89, earth:85 },
+      "22":  { air:125,pipe:118,earth:110 },
+      "38":  { air:170,pipe:160,earth:150 }
+    }
+  },
+  CV: {
+    cores: [2,3,4],
+    sizes: {
+      "2.0": { air:23, pipe:21, earth:20 },
+      "3.5": { air:37, pipe:34, earth:32 },
+      "5.5": { air:50, pipe:46, earth:44 },
+      "8":   { air:65, pipe:60, earth:57 },
+      "14":  { air:95, pipe:89, earth:85 },
+      "22":  { air:125,pipe:118,earth:110 },
+      "38":  { air:170,pipe:160,earth:150 }
+    }
+  },
+  CVT: {
+    cores: [1],
+    sizes: {
+      "8":   { air:66,  pipe:61,  earth:58 },
+      "14":  { air:98,  pipe:91,  earth:86 },
+      "22":  { air:132, pipe:124, earth:116 },
+      "38":  { air:178, pipe:168, earth:158 },
+      "60":  { air:235, pipe:220, earth:208 },
+      "100": { air:320, pipe:300, earth:285 },
+      "150": { air:400, pipe:375, earth:360 },
+      "200": { air:470, pipe:440, earth:420 }
+    }
+  }
+};
+
+// ====== 心線数係数（VVF/VVR/CV） ======
+// 2心基準 → 3心と4心で低減する目安値
+const CORE_FACTOR = { 2: 1.00, 3: 0.88, 4: 0.79 };
+
+// ====== 管内の集合条数低減（目安） ======
+const DERATE = { pipeCount: { 1:1.00, 2:0.90, 3:0.80, 4:0.70 } };
+
+// ====== ユーティリティ ======
+const elType = document.getElementById('cableType');
+const elSize = document.getElementById('cableSize');
+const elCore = document.getElementById('coreCount');
+const elMethod = document.getElementById('installMethod');
+const elPipeCount = document.getElementById('pipeCount');
+const elRounding = document.getElementById('rounding');
+const elBtn = document.getElementById('calcBtn');
+const elResult = document.getElementById('result');
+const elTables = document.getElementById('tables');
+
+function initSelectors(){
+  // 種類
+  elType.innerHTML = '<option value="">選択してください</option>' +
+    Object.keys(DATA_SOURCE).map(k=>`<option value="${k}">${k}</option>`).join('');
+
+  // 復元
+  try {
+    const saved = JSON.parse(localStorage.getItem('ref_sel')||'{}');
+    if(saved.type) elType.value = saved.type;
+  } catch(e){}
+
+  updateSizeAndCore();
+}
+
+function updateSizeAndCore(){
+  const t = elType.value;
+  elSize.innerHTML = '';
+  elCore.innerHTML = '';
+  if(!t || !DATA_SOURCE[t]) return;
+  const sizes = Object.keys(DATA_SOURCE[t].sizes);
+  elSize.innerHTML = sizes.map(s=>`<option value="${s}">${s} mm²</option>`).join('');
+  const cores = DATA_SOURCE[t].cores || [1];
+  elCore.innerHTML = cores.map(c=>`<option value="${c}">${c}心</option>`).join('');
+  // core selector visible only when more than 1 core option exists (VVF/VVR/CV)
+  elCore.parentElement.style.display = (cores.length>1) ? '' : 'none';
+}
+
+elType.addEventListener('change', ()=>{
+  updateSizeAndCore();
+});
+
+function applyRounding(value, rounding){
+  rounding = Number(rounding);
+  if(rounding <= 1) return Math.round(value);
+  return Math.round(Math.ceil(value / rounding) * rounding);
+}
+
+elBtn.addEventListener('click', ()=>{
+  const type = elType.value;
+  const size = elSize.value;
+  if(!type || !size){ elResult.textContent = '⚠ ケーブル種類とサイズを選択してください'; return; }
+
+  const method = elMethod.value;
+  const pipeCount = Number(elPipeCount.value || 1);
+  const core = Number(elCore.value || (DATA_SOURCE[type].cores ? DATA_SOURCE[type].cores[0] : 1));
+  const rounding = Number(elRounding.value || 1);
+
+  const rec = DATA_SOURCE?.[type]?.sizes?.[size];
+  if(!rec || typeof rec[method] !== 'number'){ elResult.textContent = '選択条件のデータが見つかりません'; return; }
+
+  let base = rec[method]; // 基準（2心基準の表になっている場合は別途係数）
+  let factor = 1.0;
+
+  // 管内条数補正（pipe のとき）
+  if(method === 'pipe') factor *= (DERATE.pipeCount[pipeCount] ?? 1.0);
+
+  // 心線数補正（VVF/VVR/CV のみ）
+  if(type === 'VVF' || type === 'VVR' || type === 'CV'){
+    factor *= (CORE_FACTOR[core] ?? 1.0);
+  }
+
+  const raw = base * factor;
+  const final = applyRounding(raw, rounding);
+
+  // 保存
+  localStorage.setItem('ref_sel', JSON.stringify({type,size,method,pipeCount,core,rounding}));
+
+  // 表示
+  elResult.innerHTML = `
+    <div class="flex">
+      <span class="pill">種類: <b>${type}</b></span>
+      <span class="pill">サイズ: <b>${size} mm²</b></span>
+      ${(type==='VVF'||type==='VVR'||type==='CV')?`<span class="pill">心線数: <b>${core}心</b></span>`:''}
+      <span class="pill">布設: <b>${method==='air'?'空気中':method==='pipe'?'管内':'地中'}</b></span>
+      ${method==='pipe'?`<span class="pill">管内条数: <b>${pipeCount}条</b></span>`:''}
+      <span class="pill">丸め: <b>${rounding === 1 ? 'A単位' : rounding+'A刻み'}</b></span>
+    </div>
+    <div style="margin-top:8px">基準（表値）: <b>${base} A</b></div>
+    <div>適用係数: <b>${factor.toFixed(3)}</b> （${method==='pipe' ? `管内条数${pipeCount} → ${DERATE.pipeCount[pipeCount]}倍` : '条数補正なし'}${(type==='VVF'||type==='VVR'||type==='CV')?`・心線数${core}心 → ${CORE_FACTOR[core]}倍` : ''}）</div>
+    <div style="margin-top:8px"><b style="font-size:1.2rem">許容電流（参考）: ${final} A</b></div>
+    <div class="muted" style="margin-top:6px">※ 表示は参考値です。実務では必ず正規のJIS表で確認してください。</div>
+  `;
+});
+
+// ====== 代表値テーブルの描画 ======
+function renderTables(){
+  elTables.innerHTML = '';
+  Object.keys(DATA_SOURCE).forEach(type=>{
+    const d = DATA_SOURCE[type];
+    const title = document.createElement('div');
+    title.innerHTML = `<h3 style="margin:0 0 6px">${type}（参考値）</h3>`;
+    const table = document.createElement('table');
+    table.innerHTML = `<thead><tr><th>サイズ</th><th>空気中 (A)</th><th>管内 (A)</th><th>地中 (A)</th></tr></thead>`;
+    const tbody = document.createElement('tbody');
+    Object.keys(d.sizes).forEach(sz=>{
+      const rec = d.sizes[sz];
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${sz}</td><td>${rec.air ?? '-'}</td><td>${rec.pipe ?? '-'}</td><td>${rec.earth ?? '-'}</td>`;
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'card';
+    wrapper.style.padding = '10px';
+    wrapper.appendChild(title);
+    wrapper.appendChild(table);
+    elTables.appendChild(wrapper);
+  });
+}
+
+// 初期化
+initSelectors();
+renderTables();
+
+// 復元（もしサイズ等保存されていれば）
+try {
+  const saved = JSON.parse(localStorage.getItem('ref_sel')||'{}');
+  if(saved.type){
+    document.getElementById('cableType').value = saved.type;
+    updateSizeAndCore();
+    if(saved.size) document.getElementById('cableSize').value = saved.size;
+    if(saved.core) document.getElementById('coreCount').value = saved.core;
+    if(saved.method) document.getElementById('installMethod').value = saved.method;
+    if(saved.pipeCount) document.getElementById('pipeCount').value = saved.pipeCount;
+    if(saved.rounding) document.getElementById('rounding').value = saved.rounding;
+  }
+} catch(e){}
+</script>
+</body>
+</html>
